@@ -43,7 +43,7 @@ public class NodeState {
   }
 
   public boolean setCurrentTermToGreater(long term) {
-    return currentTerm.updateAndGet(x -> Math.max(x, term)) == term;
+    return currentTerm.updateAndGet(x -> Math.max(x, term)) < term;
   }
 
   public void setCurrentTerm(long currentTerm) {
