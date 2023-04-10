@@ -14,11 +14,18 @@ public class AppendEntriesResponse extends RaftResponse {
 
   private long term;
   private boolean success;
+  private int matchIndex;
 
-  public AppendEntriesResponse(Peer from, long term, boolean success) {
+  public AppendEntriesResponse(Peer from, long term, boolean success,
+                               int matchIndex) {
     super(SELF_TYPE, from);
     this.term = term;
     this.success = success;
+    this.matchIndex = matchIndex;
+  }
+
+  public int getMatchIndex() {
+    return matchIndex;
   }
 
   @Override

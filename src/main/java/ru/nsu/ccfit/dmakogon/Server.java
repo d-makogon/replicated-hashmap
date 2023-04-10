@@ -6,6 +6,7 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 import lombok.RequiredArgsConstructor;
 import ru.nsu.ccfit.dmakogon.network.AppendEntriesRequest;
@@ -16,6 +17,8 @@ import ru.nsu.ccfit.dmakogon.network.RaftResponse;
 import ru.nsu.ccfit.dmakogon.network.RequestVoteRequest;
 import ru.nsu.ccfit.dmakogon.network.RequestVoteResponse;
 import ru.nsu.ccfit.dmakogon.operations.Operation;
+import ru.nsu.ccfit.dmakogon.operations.OperationType;
+import ru.nsu.ccfit.dmakogon.storage.ReplicatedHashMapEntry;
 
 @RequiredArgsConstructor
 public class Server {
@@ -25,6 +28,7 @@ public class Server {
   private Peer leader;
   private final Random random = new Random();
   private int electionTimeout;
+  private int selfVotesCount = 0;
   private final BiConsumer applyLogListener;
 
   private final Timer electionTimer = new Timer("Election timer");
@@ -40,9 +44,6 @@ public class Server {
     }
   }
 
-  // If election timeout elapses without receiving AppendEntries
-  // RPC from current leader or granting vote to candidate:
-  // convert to candidate.
   private void resetElectionTimer() {
     electionTimer.cancel();
     electionTimerElapsed.set(false);
@@ -62,12 +63,17 @@ public class Server {
   private void becomeCandidate() {
     selfState.setType(NodeState.NodeType.CANDIDATE);
 
-    // On conversion to candidate, start election:
+    // On conversion to candidate, start election.
+    startElection();
+  }
+
+  private void startElection() {
     // 1. Increment currentTerm
     long term = selfState.incrementCurrentTerm();
 
     // 2. Vote for self
     selfState.setVotedFor(selfPeer.getId());
+    selfVotesCount = 1;
 
     // 3. Reset election timer
     resetElectionTimer();
@@ -97,7 +103,17 @@ public class Server {
   }
 
   private void becomeLeader() {
+    selfState.setType(NodeState.NodeType.LEADER);
+
     leader = selfPeer;
+
+    // nextIndex and matchIndex are reinitialized after election.
+    var log = selfState.getOperationsLog();
+    for (var peer : selfState.getPeers()) {
+      peer.setNextIndex(log.getLastIndex() + 1);
+      peer.setMatchIndex(0);
+    }
+
     // Upon election: send initial empty AppendEntries RPCs (heartbeat) to
     // each server; repeat during idle periods to prevent election timeouts
     // (§5.2)
@@ -110,6 +126,11 @@ public class Server {
   }
 
   private RaftResponse handleRequest(RaftRequest request) {
+    // If follower receives an appendEntries request, it resets the election
+    // timer.
+    if (selfState.getType() == NodeState.NodeType.FOLLOWER && request.getType() == RaftRequest.RequestType.APPEND_ENTRIES)
+      resetElectionTimer();
+
     // If RPC request or response contains term T > currentTerm:
     // set currentTerm = T, convert to follower (§5.1)
     boolean hadOldTerm = selfState.setCurrentTermToGreater(request.getTerm());
@@ -158,12 +179,20 @@ public class Server {
           AppendEntriesRequest request) {
     var log = selfState.getOperationsLog();
     var currentTerm = selfState.getCurrentTerm();
-    var falseResponse = new AppendEntriesResponse(selfPeer, currentTerm, false);
+    var falseResponse = new AppendEntriesResponse(selfPeer, currentTerm, false,
+                                                  log.getLastIndex()
+    );
     // 1. Reply false if term < currentTerm (§5.1)
     if (request.getTerm() < currentTerm)
       return falseResponse;
 
-    // 2. Reply false if log doesn’t contain an entry at prevLogIndex
+    // If the leader’s term (included in its RPC) is at least as large as the
+    // candidate’s current term, then the candidate recognizes the leader as
+    // legitimate and returns to follower state.
+    if (selfState.getType() == NodeState.NodeType.CANDIDATE)
+      becomeFollower();
+
+    // 2. Reply false if log doesn't contain an entry at prevLogIndex
     //    whose term matches prevLogTerm (§5.3)
     var entry = log.tryGet(request.getPrevLogIndex());
     if (entry.isEmpty() || entry.get().term() != request.getPrevLogTerm())
@@ -189,7 +218,9 @@ public class Server {
     int leaderCommit = request.getLeaderCommit();
     if (leaderCommit > selfState.getCommitIndex())
       selfState.setCommitIndex(Math.min(leaderCommit, log.getLastIndex()));
-    return new AppendEntriesResponse(selfPeer, currentTerm, true);
+    return new AppendEntriesResponse(selfPeer, currentTerm, true,
+                                     log.getLastIndex()
+    );
   }
 
   private void handleResponse(RaftResponse response) {
@@ -209,17 +240,95 @@ public class Server {
 
   private void handleAppendEntriesResponse(AppendEntriesResponse response) {
     // If successful: update nextIndex and matchIndex for follower (§5.3)
+    var maybePeer = selfState.findPeer(response.getFromPeer().getId());
+    if (maybePeer.isEmpty())
+      throw new IllegalStateException("Unknown peer");
+    var peer = maybePeer.get();
+    if (response.isSuccess()) {
+      int matchIndex = response.getMatchIndex();
+      peer.setMatchIndex(matchIndex);
+      peer.setNextIndex(matchIndex + 1);
+      return;
+    }
     // If AppendEntries fails because of log inconsistency: decrement
     // nextIndex and retry (§5.3)
+    peer.decrementNextIndex();
   }
 
   private void handleRequestVoteResponse(RequestVoteResponse response) {
-    //
+    if (selfState.getType() == NodeState.NodeType.CANDIDATE && response.isVoteGranted())
+      selfVotesCount++;
   }
 
   private void applyLogEntry(Operation operation) {
     var entry = operation.entry();
     applyLogListener.accept(entry.getKey(), entry.getValue());
+  }
+
+  // If command received from client: append entry to local log, respond
+  // after entry applied to state machine (§5.3)
+  public void submit(OperationType type, ReplicatedHashMapEntry<?, ?> entry) {
+    var log = selfState.getOperationsLog();
+    log.append(new Operation(selfState.getCurrentTerm(), type, entry));
+  }
+
+  private void tryToCommit() {
+    // If there exists an N such that N > commitIndex, a majority
+    // of matchIndex[i] ≥ N, and operations[N].term == currentTerm:
+    // set commitIndex = N (§5.3, §5.4).
+    var log = selfState.getOperationsLog();
+    while (true) {
+      int N = selfState.getCommitIndex() + 1;
+      Supplier<Long> peersWithHigherMatchIdx = () -> selfState.getPeers()
+              .stream()
+              .filter(peer -> peer.getMatchIndex() >= N)
+              .count() + 1;
+      if (log.getLastIndex() >= N && log.getTerm(
+              N) == selfState.getCurrentTerm() && peersWithHigherMatchIdx.get() >= selfState.getQuorum())
+        selfState.setCommitIndex(N);
+      else
+        return;
+    }
+  }
+
+  private void sendAppendEntries() {
+    // If last log index ≥ nextIndex for a follower: send AppendEntries
+    // RPC with log entries starting at nextIndex.
+    var log = selfState.getOperationsLog();
+    int lastLogIndex = log.getLastIndex();
+    for (var peer : selfState.getPeers()) {
+      int nextIndex = peer.getNextIndex();
+      if (lastLogIndex >= nextIndex) {
+        var request = new AppendEntriesRequest(selfPeer,
+                                               selfState.getCurrentTerm(),
+                                               selfPeer.getId(), nextIndex,
+                                               log.getTerm(nextIndex),
+                                               log.allFromIndex(nextIndex),
+                                               selfState.getCommitIndex()
+        );
+        network.sendRequest(peer, request);
+      }
+    }
+  }
+
+  private void handlePendingRequests() {
+    while (true) {
+      var maybeRequest = network.getNextRequest();
+      if (maybeRequest.isEmpty())
+        break;
+      RaftRequest request = maybeRequest.get();
+      var response = handleRequest(request);
+      network.sendResponse(request.getFromPeer(), response);
+    }
+  }
+
+  private void handlePendingResponses() {
+    while (true) {
+      var maybeResponse = network.getNextResponse();
+      if (maybeResponse.isEmpty())
+        break;
+      handleResponse(maybeResponse.get());
+    }
   }
 
   public void loop() {
@@ -228,33 +337,38 @@ public class Server {
     int commitIndex = selfState.getCommitIndex();
     int lastApplied = selfState.getLastApplied();
     var log = selfState.getOperationsLog();
-    if (commitIndex > lastApplied)
-      applyLogEntry(log.get(lastApplied));
-
-    while (true) {
-      var maybeResponse = network.getNextResponse();
-      if (maybeResponse.isEmpty())
-        break;
-      handleResponse(maybeResponse.get());
+    if (commitIndex > lastApplied) {
+      int newLastApplied = selfState.incrementLastApplied();
+      applyLogEntry(log.get(newLastApplied));
     }
+
+    handlePendingResponses();
 
     switch (selfState.getType()) {
       case LEADER -> {
+        // Repeat during idle periods to prevent election timeouts (§5.2).
+        sendHeartbeats();
+
+        // If last log index ≥ nextIndex for a follower: send AppendEntries
+        // RPC with log entries starting at nextIndex.
+        sendAppendEntries();
+
+        // If there exists an N such that N > commitIndex, a majority of
+        // matchIndex[i] ≥ N, and log[N].term == currentTerm: set commitIndex
+        // = N (§5.3, §5.4).
+        tryToCommit();
       }
       case CANDIDATE -> {
+        // If votes received from the majority of servers: become leader.
+        // If election timeout elapses: start new election.
+        if (selfVotesCount >= selfState.getQuorum())
+          becomeLeader();
+        else if (electionTimerElapsed.get())
+          startElection();
       }
       case FOLLOWER -> {
-        // Respond to RPCs from candidates and leaders
-        while (true) {
-          var maybeRequest = network.getNextRequest();
-          if (maybeRequest.isEmpty())
-            break;
-          RaftRequest request = maybeRequest.get();
-          if (request.getType() == RaftRequest.RequestType.APPEND_ENTRIES)
-            resetElectionTimer();
-          var response = handleRequest(request);
-          network.sendResponse(request.getFromPeer(), response);
-        }
+        // Respond to RPCs from candidates and leaders.
+        handlePendingRequests();
 
         // If election timeout elapses without receiving AppendEntries
         // RPC from current leader or granting vote to candidate:

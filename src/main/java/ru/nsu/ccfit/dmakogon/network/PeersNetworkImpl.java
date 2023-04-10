@@ -4,12 +4,10 @@ import com.google.gson.Gson;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,7 +21,6 @@ public class PeersNetworkImpl implements PeersNetwork {
   private static final Gson gson = new Gson();
 
   private final Map<Peer, Socket> sockets = new HashMap<>();
-  private final Selector selector = Selector.open();
   private final Queue<RaftRequest> receivedRequests = new ArrayDeque<>();
   private final Queue<RaftResponse> receivedResponses = new ArrayDeque<>();
 
@@ -32,10 +29,8 @@ public class PeersNetworkImpl implements PeersNetwork {
 
   @SneakyThrows
   @Override
-  public void addPeer(Peer peer, SocketChannel channel) {
-    var socket = channel.socket();
+  public void addPeer(Peer peer, Socket socket) {
     sockets.put(peer, socket);
-    channel.register(selector, SelectionKey.OP_READ);
   }
 
   @SneakyThrows
@@ -58,21 +53,17 @@ public class PeersNetworkImpl implements PeersNetwork {
 
   @SneakyThrows
   private void readNewMessages() {
-    selector.select(0);
-    var selectedKeys = selector.selectedKeys();
-    var iter = selectedKeys.iterator();
-    while (iter.hasNext()) {
-      SelectionKey key = iter.next();
-      if (key.isReadable())
-        readNewMessage((SocketChannel) key.channel());
-      iter.remove();
+    for (var entry : sockets.entrySet()) {
+      var socket = entry.getValue();
+      var stream = socket.getInputStream();
+      if (stream.available() > 0)
+        readNewMessage(stream);
     }
   }
 
   @SneakyThrows
-  private void readNewMessage(SocketChannel channel) {
-    var socket = channel.socket();
-    var reader = new InputStreamReader(socket.getInputStream());
+  private void readNewMessage(InputStream inputStream) {
+    var reader = new InputStreamReader(inputStream);
     var message = gson.fromJson(reader, RaftMessage.class);
     if (message instanceof RaftRequest)
       receivedRequests.add((RaftRequest) message);

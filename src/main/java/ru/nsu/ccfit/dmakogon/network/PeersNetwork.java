@@ -1,12 +1,12 @@
 package ru.nsu.ccfit.dmakogon.network;
 
-import java.nio.channels.SocketChannel;
+import java.net.Socket;
 import java.util.Optional;
 
 import ru.nsu.ccfit.dmakogon.Peer;
 
 public interface PeersNetwork {
-  void addPeer(Peer peer, SocketChannel socket);
+  void addPeer(Peer peer, Socket socket);
 
   Optional<? extends RaftResponse> getNextResponse();
 

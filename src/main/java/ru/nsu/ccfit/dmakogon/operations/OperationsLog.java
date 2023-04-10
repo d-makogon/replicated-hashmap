@@ -19,4 +19,6 @@ public interface OperationsLog {
   long getLastTerm();
 
   void removeAllFromIndex(int index);
+
+  List<Operation> allFromIndex(int index);
 }

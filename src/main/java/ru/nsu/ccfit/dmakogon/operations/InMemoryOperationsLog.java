@@ -63,4 +63,9 @@ public class InMemoryOperationsLog implements OperationsLog {
       log.removeAll(toRemove);
     }
   }
+
+  @Override
+  public List<Operation> allFromIndex(int index) {
+    return log.stream().skip(index).toList();
+  }
 }

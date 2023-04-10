@@ -34,6 +34,10 @@ public class NodeState {
     return peers;
   }
 
+  public int getQuorum() {
+    return peers.size() / 2 + 1;
+  }
+
   public OperationsLog getOperationsLog() {
     return operationsLog;
   }
@@ -44,6 +48,17 @@ public class NodeState {
 
   public boolean setCurrentTermToGreater(long term) {
     return currentTerm.updateAndGet(x -> Math.max(x, term)) < term;
+  }
+
+  public Optional<Peer> findPeer(int id) {
+    var peersWithId = peers.stream()
+            .filter(peer -> peer.getId() == id)
+            .toList();
+    if (peersWithId.size() > 1)
+      throw new IllegalStateException("Several peers with same ids");
+    if (peersWithId.size() == 1)
+      return Optional.of(peersWithId.get(0));
+    return Optional.empty();
   }
 
   public void setCurrentTerm(long currentTerm) {
@@ -73,11 +88,11 @@ public class NodeState {
     return lastApplied.get();
   }
 
-  public void setCommitIndex(int commitIndex) {
-    this.commitIndex.set(commitIndex);
+  public int incrementLastApplied() {
+    return lastApplied.incrementAndGet();
   }
 
-  public void setLastApplied(int lastApplied) {
-    this.lastApplied.set(lastApplied);
+  public void setCommitIndex(int commitIndex) {
+    this.commitIndex.set(commitIndex);
   }
 }
