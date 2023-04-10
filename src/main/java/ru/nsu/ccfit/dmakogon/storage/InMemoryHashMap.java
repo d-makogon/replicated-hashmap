@@ -14,6 +14,11 @@ public class InMemoryHashMap<K, V> implements ReplicatedHashMap<K, V> {
   }
 
   @Override
+  public void insert(ReplicatedHashMapEntry<K, V> entry) {
+    insert(entry.getKey(), entry.getValue());
+  }
+
+  @Override
   public void insert(K key, V value) {
     map.put(key, value);
   }

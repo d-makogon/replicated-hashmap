@@ -13,4 +13,6 @@ public interface PeersNetwork {
   Optional<? extends RaftRequest> getNextRequest();
 
   void sendRequest(Peer peer, RaftRequest request);
+
+  void sendResponse(Peer peer, RaftResponse response);
 }

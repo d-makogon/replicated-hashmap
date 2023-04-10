@@ -1,10 +1,14 @@
 package ru.nsu.ccfit.dmakogon.network;
 
 import lombok.Getter;
+import ru.nsu.ccfit.dmakogon.Peer;
 
 public abstract class RaftRequest implements RaftMessage {
-  public RaftRequest(RequestType type) {
+  private final Peer fromPeer;
+
+  public RaftRequest(RequestType type, Peer fromPeer) {
     this.type = type;
+    this.fromPeer = fromPeer;
   }
 
   public enum RequestType {
@@ -14,5 +18,8 @@ public abstract class RaftRequest implements RaftMessage {
   @Getter
   private final RequestType type;
 
-  public abstract long getTerm();
+  @Override
+  public Peer getFromPeer() {
+    return fromPeer;
+  }
 }

@@ -3,6 +3,7 @@ package ru.nsu.ccfit.dmakogon.network;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import ru.nsu.ccfit.dmakogon.Peer;
 
 @Getter
 @Setter
@@ -14,9 +15,18 @@ public class AppendEntriesResponse extends RaftResponse {
   private long term;
   private boolean success;
 
-  public AppendEntriesResponse(long term, boolean success) {
-    super(SELF_TYPE);
+  public AppendEntriesResponse(Peer from, long term, boolean success) {
+    super(SELF_TYPE, from);
     this.term = term;
     this.success = success;
+  }
+
+  @Override
+  public long getTerm() {
+    return term;
+  }
+
+  public boolean isSuccess() {
+    return success;
   }
 }

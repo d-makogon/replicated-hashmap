@@ -3,6 +3,7 @@ package ru.nsu.ccfit.dmakogon.network;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import ru.nsu.ccfit.dmakogon.Peer;
 
 @Getter
 @Setter
@@ -15,9 +16,9 @@ public class RequestVoteRequest extends RaftRequest {
   private int lastLogIndex;
   private long lastLogTerm;
 
-  public RequestVoteRequest(long term, int candidateId, int lastLogIndex,
-                            long lastLogTerm) {
-    super(SELF_TYPE);
+  public RequestVoteRequest(Peer from, long term, int candidateId,
+                            int lastLogIndex, long lastLogTerm) {
+    super(SELF_TYPE, from);
     this.term = term;
     this.candidateId = candidateId;
     this.lastLogIndex = lastLogIndex;

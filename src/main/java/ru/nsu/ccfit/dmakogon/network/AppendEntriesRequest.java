@@ -5,6 +5,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import ru.nsu.ccfit.dmakogon.Peer;
 import ru.nsu.ccfit.dmakogon.operations.Operation;
 
 @Getter
@@ -20,10 +21,10 @@ public class AppendEntriesRequest extends RaftRequest {
   private List<Operation> entries;
   private int leaderCommit;
 
-  public AppendEntriesRequest(long term, int leaderId, int prevLogIndex,
-                              long prevLogTerm, List<Operation> entries,
-                              int leaderCommit) {
-    super(SELF_TYPE);
+  public AppendEntriesRequest(Peer from, long term, int leaderId,
+                              int prevLogIndex, long prevLogTerm,
+                              List<Operation> entries, int leaderCommit) {
+    super(SELF_TYPE, from);
     this.term = term;
     this.leaderId = leaderId;
     this.prevLogIndex = prevLogIndex;

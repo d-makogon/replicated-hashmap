@@ -33,7 +33,8 @@ public class PeersNetworkImpl implements PeersNetwork {
   @SneakyThrows
   @Override
   public void addPeer(Peer peer, SocketChannel channel) {
-    sockets.put(peer, channel.socket());
+    var socket = channel.socket();
+    sockets.put(peer, socket);
     channel.register(selector, SelectionKey.OP_READ);
   }
 
@@ -57,7 +58,7 @@ public class PeersNetworkImpl implements PeersNetwork {
 
   @SneakyThrows
   private void readNewMessages() {
-    selector.select();
+    selector.select(0);
     var selectedKeys = selector.selectedKeys();
     var iter = selectedKeys.iterator();
     while (iter.hasNext()) {
@@ -82,12 +83,22 @@ public class PeersNetworkImpl implements PeersNetwork {
   }
 
   @SneakyThrows
-  @Override
-  public void sendRequest(Peer peer, RaftRequest request) {
-    var socket = sockets.get(peer);
+  private void writeObject(Socket socket, Object object) {
     var writer = new BufferedWriter(
             new OutputStreamWriter(socket.getOutputStream()));
-    gson.toJson(request, writer);
+    gson.toJson(object, writer);
     writer.flush();
+  }
+
+  @SneakyThrows
+  @Override
+  public void sendRequest(Peer peer, RaftRequest request) {
+    writeObject(sockets.get(peer), request);
+  }
+
+  @SneakyThrows
+  @Override
+  public void sendResponse(Peer peer, RaftResponse response) {
+    writeObject(sockets.get(peer), response);
   }
 }

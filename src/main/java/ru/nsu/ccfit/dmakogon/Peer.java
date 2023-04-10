@@ -9,9 +9,9 @@ public class Peer {
   @Getter
   private int id;
 
-  private final AtomicInteger nextIndex = new AtomicInteger(0);
-  private final AtomicInteger matchIndex = new AtomicInteger(-1);
-  private final AtomicBoolean voteGranted = new AtomicBoolean(false);
+  private final transient AtomicInteger nextIndex = new AtomicInteger(0);
+  private final transient AtomicInteger matchIndex = new AtomicInteger(-1);
+  private final transient AtomicBoolean voteGranted = new AtomicBoolean(false);
 
   int getNextIndex() {
     return nextIndex.get();

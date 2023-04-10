@@ -4,8 +4,13 @@ import java.util.List;
 
 public interface ReplicatedHashMap<K, V> {
   V get(K key);
+
+  void insert(ReplicatedHashMapEntry<K, V> entry);
+
   void insert(K key, V value);
+
   void update(K key, V value);
+
   void remove(K key);
 
   List<ReplicatedHashMapEntry<K, V>> all();
