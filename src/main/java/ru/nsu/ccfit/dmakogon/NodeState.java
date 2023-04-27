@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import ru.nsu.ccfit.dmakogon.network.PeersList;
 import ru.nsu.ccfit.dmakogon.operations.OperationsLog;
 
 @RequiredArgsConstructor
@@ -27,15 +28,15 @@ public class NodeState {
   private final AtomicInteger votedFor = new AtomicInteger(0);
   private final AtomicInteger commitIndex = new AtomicInteger(0);
   private final AtomicInteger lastApplied = new AtomicInteger(0);
-  private final List<Peer> peers = new ArrayList<>();
+  private final PeersList peers;
   private final OperationsLog operationsLog;
 
-  public List<Peer> getPeers() {
+  public PeersList getPeers() {
     return peers;
   }
 
   public int getQuorum() {
-    return peers.size() / 2 + 1;
+    return (peers.size() + 1) / 2 + 1;
   }
 
   public OperationsLog getOperationsLog() {

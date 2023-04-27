@@ -4,10 +4,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 
 public class Peer {
   @Getter
+  @Setter
   private int id;
+
+  public Peer(int id) {
+    this.id = id;
+  }
 
   private final transient AtomicInteger nextIndex = new AtomicInteger(0);
   private final transient AtomicInteger matchIndex = new AtomicInteger(-1);

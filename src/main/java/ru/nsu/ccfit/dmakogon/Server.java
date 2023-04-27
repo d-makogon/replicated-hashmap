@@ -1,14 +1,17 @@
 package ru.nsu.ccfit.dmakogon;
 
+import java.net.ServerSocket;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import ru.nsu.ccfit.dmakogon.network.AppendEntriesRequest;
 import ru.nsu.ccfit.dmakogon.network.AppendEntriesResponse;
 import ru.nsu.ccfit.dmakogon.network.PeersNetwork;
@@ -22,6 +25,10 @@ import ru.nsu.ccfit.dmakogon.storage.ReplicatedHashMapEntry;
 
 @RequiredArgsConstructor
 public class Server {
+  private static final long TICK_TIME_MS = 1000;
+
+  private final Thread workerThread = new Thread(this::serverRoutine);
+  private long tickStartTime;
   private final PeersNetwork network;
   private final NodeState selfState;
   private final Peer selfPeer;
@@ -29,9 +36,11 @@ public class Server {
   private final Random random = new Random();
   private int electionTimeout;
   private int selfVotesCount = 0;
-  private final BiConsumer applyLogListener;
+  private final Consumer<Operation> applyLogListener;
+  private final ServerSocket selfSocket;
 
   private final Timer electionTimer = new Timer("Election timer");
+  private TimerTask electionTimerTask = null;
   private final AtomicBoolean electionTimerElapsed = new AtomicBoolean(false);
 
   private void handleTypeChange(NodeState.NodeType newType) {
@@ -45,15 +54,18 @@ public class Server {
   }
 
   private void resetElectionTimer() {
-    electionTimer.cancel();
+    if (electionTimerTask != null)
+      electionTimerTask.cancel();
     electionTimerElapsed.set(false);
-    var newTimeout = random.nextInt(150, 300);
-    electionTimer.schedule(new TimerTask() {
+    var timeout = random.nextInt(150, 300);
+    electionTimerTask = new TimerTask() {
       @Override
       public void run() {
+        System.err.println("Election timer elapsed");
         electionTimerElapsed.set(true);
       }
-    }, newTimeout);
+    };
+    electionTimer.schedule(electionTimerTask, timeout);
   }
 
   private void becomeFollower() {
@@ -90,6 +102,8 @@ public class Server {
   }
 
   private void sendHeartbeats() {
+    HashMap
+    System.err.println("sendHeartbeats");
     var log = selfState.getOperationsLog();
     int prevLogIndex = log.getLastIndex();
     var heartbeat = new AppendEntriesRequest(selfPeer,
@@ -261,8 +275,7 @@ public class Server {
   }
 
   private void applyLogEntry(Operation operation) {
-    var entry = operation.entry();
-    applyLogListener.accept(entry.getKey(), entry.getValue());
+    applyLogListener.accept(operation);
   }
 
   // If command received from client: append entry to local log, respond
@@ -331,7 +344,16 @@ public class Server {
     }
   }
 
+  @SneakyThrows
   public void loop() {
+    var channel = selfSocket.getChannel();
+    var newSocketChannel = channel.accept();
+    if (newSocketChannel != null) {
+      newSocketChannel.configureBlocking(false);
+      var newPeer = selfState.getPeers().createPeer();
+      network.addPeer(newPeer, newSocketChannel.socket());
+    }
+
     // If commitIndex > lastApplied: increment lastApplied, apply
     // log[lastApplied] to state machine (§5.3).
     int commitIndex = selfState.getCommitIndex();
@@ -377,5 +399,35 @@ public class Server {
           becomeCandidate();
       }
     }
+  }
+
+  private void serverRoutine() {
+    int tick = 0;
+    becomeFollower();
+    resetElectionTimer();
+    while (true) {
+      System.err.println(
+              "Tick " + tick + ", state: " + selfState.getType().toString());
+      tick++;
+      tickStartTime = System.currentTimeMillis();
+      loop();
+      long tickTime = System.currentTimeMillis() - tickStartTime;
+      if (tickTime >= TICK_TIME_MS)
+        continue;
+      try {
+        Thread.sleep(TICK_TIME_MS - tickTime);
+      } catch (InterruptedException e) {
+        break;
+      }
+    }
+  }
+
+  public void start() {
+    workerThread.start();
+  }
+
+  public void stop() throws InterruptedException {
+    workerThread.interrupt();
+    workerThread.join();
   }
 }
